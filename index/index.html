@@ -1,0 +1,245 @@
+{
+  "name": "axiom-ai",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "next": "14.2.23",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "14.2.23",
+    "postcss": "^8.5.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3"
+  }
+}
+{
+  "compilerOptions": {
+    "target": "es5",
+    "lib": ["dom", "dom.iterable", "es2022"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+const nextConfig = {};
+
+module.exports = nextConfig;
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  theme: {
+    extend: {
+      colors: {
+        paper: "var(--paper)",
+        "paper-2": "var(--paper-2)",
+        rule: "var(--rule)",
+        ink: "var(--ink)",
+        "ink-2": "var(--ink-2)",
+        "ink-3": "var(--ink-3)",
+        accent: "var(--accent)",
+        danger: "var(--danger)"
+      },
+      borderRadius: {
+        DEFAULT: "var(--radius)"
+      },
+      fontFamily: {
+        serif: ["Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", "serif"],
+        sans: [
+          "Inter",
+          "ui-sans-serif",
+          "system-ui",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "sans-serif"
+        ],
+        mono: [
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Monaco",
+          "Consolas",
+          "Liberation Mono",
+          "monospace"
+        ]
+      },
+      spacing: {
+        1: "var(--s-1)",
+        2: "var(--s-2)",
+        3: "var(--s-3)",
+        4: "var(--s-4)",
+        5: "var(--s-5)",
+        6: "var(--s-6)",
+        7: "var(--s-7)",
+        8: "var(--s-8)"
+      }
+    }
+  },
+  plugins: []
+};
+
+export default config;
+module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {}
+  }
+};
+import type { Metadata } from "next";
+import "./globals.css";
+
+const faviconSvg = encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#1a1a1a"/><text x="32" y="43" text-anchor="middle" font-family="Georgia,serif" font-size="38" fill="#f5f1ea">A</text></svg>`
+);
+
+export const metadata: Metadata = {
+  title: "Axiom AI — Strategic Analysis for Commerce Operators",
+  description:
+    "Strategic analysis for Shopify operators. Upload your store data and get a consultant-grade read on what's working, what isn't, and what to do next.",
+  openGraph: {
+    title: "Axiom AI — Strategic Analysis for Commerce Operators",
+    description:
+      "Strategic analysis for Shopify operators. Upload your store data and get a consultant-grade read on what's working, what isn't, and what to do next.",
+    type: "website"
+  },
+  icons: {
+    icon: `data:image/svg+xml,${faviconSvg}`
+  }
+};
+
+export default function RootLayout({
+  children
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+import Anthropic from "@anthropic-ai/sdk";
+import { NextResponse } from "next/server";
+
+const SYSTEM_PROMPT = `You are a senior partner at Axiom AI, a boutique strategy firm specialising in direct-to-consumer and commerce businesses. You think like a seasoned operator, not a textbook consultant. You are direct, numerate, and confident. You are willing to say 'the data does not support a confident call here' when that is true.
+
+You write in the voice of a written memo. No bullet-point spam. No emoji. No sparkle language. No hype. No filler phrases like 'in today's fast-paced world' or 'unlock your potential'. You sound like someone who has run businesses and now advises them.
+
+Given the store data below, produce a strategic memorandum. Prioritise the ONE constraint that matters most, then supporting observations, then concrete recommended actions in priority order.
+
+Respond ONLY with a JSON object, no markdown fences, no preamble. Schema:
+
+{
+  "title": "A specific title that names the core finding, e.g. 'CAC inflation is eating your growth'",
+  "kpis": [
+    { "label": "Gross sales (90d)", "value": "$184k", "delta": "+8% vs prior" }
+  ],
+  "memo": [
+    { "heading": "The situation", "paragraphs": ["...", "..."] },
+    { "heading": "What the numbers say", "paragraphs": ["..."] },
+    { "heading": "The core constraint", "paragraphs": ["..."] }
+  ],
+  "recommendations": [
+    { "title": "Short imperative", "detail": "1-3 sentences.", "priority": "high" }
+  ]
+}
+
+Include 3-4 KPIs most relevant to THIS business. Include 3-5 recommendations, most important first, priority one of 'high' | 'medium' | 'low'. If input is thin or malformed, produce the memo anyway but be honest about what you cannot determine, and make the first recommendation 'get the measurement right first.'`;
+
+function parseAssistantJson(text: string) {
+  const withoutFences = text
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  const firstBrace = withoutFences.indexOf("{");
+  const lastBrace = withoutFences.lastIndexOf("}");
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error("The model did not return a JSON object.");
+  }
+
+  return JSON.parse(withoutFences.slice(firstBrace, lastBrace + 1));
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const input = typeof body?.input === "string" ? body.input : "";
+    const mode = typeof body?.mode === "string" ? body.mode : "unknown";
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json(
+        { error: "ANTHROPIC_API_KEY is not configured on the server." },
+        { status: 500 }
+      );
+    }
+
+    const anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY
+    });
+
+    const message = await anthropic.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 4000,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `Input mode: ${mode}
+
+Store data:
+${input || "No input provided."}`
+        }
+      ]
+    });
+
+    const text = message.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("\n")
+      .trim();
+
+    const parsed = parseAssistantJson(text);
+
+    return NextResponse.json(parsed);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "The analysis could not be completed."
+      },
+      { status: 500 }
+    );
