@@ -1,3 +1,6 @@
+==============================
+package.json
+==============================
 {
   "name": "axiom-ai",
   "version": "1.0.0",
@@ -26,6 +29,10 @@
     "typescript": "^5.7.3"
   }
 }
+
+==============================
+tsconfig.json
+==============================
 {
   "compilerOptions": {
     "target": "es5",
@@ -49,9 +56,17 @@
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]
 }
+
+==============================
+next.config.js
+==============================
 const nextConfig = {};
 
 module.exports = nextConfig;
+
+==============================
+tailwind.config.ts
+==============================
 import type { Config } from "tailwindcss";
 
 const config: Config = {
@@ -108,12 +123,20 @@ const config: Config = {
 };
 
 export default config;
+
+==============================
+postcss.config.js
+==============================
 module.exports = {
   plugins: {
     tailwindcss: {},
     autoprefixer: {}
   }
 };
+
+==============================
+app/layout.tsx
+==============================
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -147,6 +170,1211 @@ export default function RootLayout({
     </html>
   );
 }
+
+==============================
+app/page.tsx
+==============================
+"use client";
+
+import { DragEvent, useEffect, useRef, useState } from "react";
+
+type Tab = "upload" | "paste" | "manual";
+type Priority = "high" | "medium" | "low";
+
+type Kpi = {
+  label: string;
+  value: string;
+  delta: string;
+};
+
+type MemoSection = {
+  heading: string;
+  paragraphs: string[];
+};
+
+type Recommendation = {
+  title: string;
+  detail: string;
+  priority: Priority;
+};
+
+type AnalysisResult = {
+  title: string;
+  kpis: Kpi[];
+  memo: MemoSection[];
+  recommendations: Recommendation[];
+};
+
+const SAMPLE_DATA = `{
+  "store": {
+    "name": "Northline Supply Co.",
+    "platform": "Shopify",
+    "category": "apparel DTC",
+    "period": "last_90_days",
+    "currency": "USD"
+  },
+  "summary": {
+    "gross_sales": 184230,
+    "net_sales": 164910,
+    "orders": 4216,
+    "average_order_value": 43.70,
+    "conversion_rate": 1.74,
+    "sessions": 242299,
+    "return_rate": 10.5,
+    "gross_margin": 57.8,
+    "marketing_spend": 103870,
+    "blended_cac": 34,
+    "prior_period_cac": 22
+  },
+  "traffic_sources": {
+    "paid_social": {
+      "sessions": 109480,
+      "orders": 1668,
+      "conversion_rate": 1.52,
+      "revenue": 71980,
+      "cac": 39
+    },
+    "organic_search": {
+      "sessions": 51260,
+      "orders": 1054,
+      "conversion_rate": 2.06,
+      "revenue": 46210,
+      "cac": 4
+    },
+    "email": {
+      "sessions": 28720,
+      "orders": 816,
+      "conversion_rate": 2.84,
+      "revenue": 35870,
+      "cac": 2
+    },
+    "direct": {
+      "sessions": 52839,
+      "orders": 678,
+      "conversion_rate": 1.28,
+      "revenue": 30170,
+      "cac": 0
+    }
+  },
+  "top_products": [
+    {
+      "title": "Meridian Heavyweight Tee",
+      "units": 1840,
+      "revenue": 62560,
+      "return_rate": 6.2
+    },
+    {
+      "title": "Hearth Overshirt",
+      "units": 690,
+      "revenue": 54510,
+      "return_rate": 14.8
+    },
+    {
+      "title": "Archive Cotton Trouser",
+      "units": 520,
+      "revenue": 43680,
+      "return_rate": 18.1
+    },
+    {
+      "title": "Weekender Canvas Tote",
+      "units": 810,
+      "revenue": 23480,
+      "return_rate": 4.7
+    }
+  ],
+  "trend_vs_prior_90": {
+    "gross_sales": "+8.1%",
+    "net_sales": "+3.4%",
+    "orders": "+5.6%",
+    "average_order_value": "+2.2%",
+    "conversion_rate": "-19.4%",
+    "sessions": "+31.0%",
+    "return_rate": "+2.7 pts",
+    "gross_margin": "-3.8 pts",
+    "marketing_spend": "+62.5%",
+    "blended_cac": "+54.5%"
+  }
+}`;
+
+const tabs: { id: Tab; label: string }[] = [
+  { id: "upload", label: "Upload JSON" },
+  { id: "paste", label: "Paste data" },
+  { id: "manual", label: "Enter manually" }
+];
+
+function todayLabel() {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  }).format(new Date());
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+export default function Home() {
+  const [activeTab, setActiveTab] = useState<Tab>("upload");
+  const [pasteValue, setPasteValue] = useState("");
+  const [manualDescription, setManualDescription] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [stage, setStage] = useState("");
+  const [uploadedValue, setUploadedValue] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [statusText, setStatusText] = useState("");
+  const [statusMode, setStatusMode] = useState<"idle" | "loading" | "error" | "success">("idle");
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const reportRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (result) {
+      window.setTimeout(() => {
+        reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
+    }
+  }, [result]);
+
+  function useSampleData() {
+    setActiveTab("paste");
+    setPasteValue(SAMPLE_DATA);
+    setStatusMode("idle");
+    setStatusText("");
+  }
+
+  function readFile(file: File) {
+    if (!file.name.toLowerCase().endsWith(".json") && file.type !== "application/json") {
+      setStatusMode("error");
+      setStatusText("Please select a JSON file.");
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      setUploadedValue(String(reader.result || ""));
+      setFileName(file.name);
+      setStatusMode("success");
+      setStatusText(`${file.name} is ready for analysis.`);
+    };
+
+    reader.onerror = () => {
+      setStatusMode("error");
+      setStatusText("The file could not be read. Please try another JSON export.");
+    };
+
+    reader.readAsText(file);
+  }
+
+  function handleDrop(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setDragActive(false);
+
+    const file = event.dataTransfer.files?.[0];
+
+    if (file) {
+      readFile(file);
+    }
+  }
+
+  function buildInput() {
+    if (activeTab === "upload") {
+      if (!uploadedValue.trim()) {
+        throw new Error("Upload a JSON file before commissioning the analysis.");
+      }
+
+      return uploadedValue;
+    }
+
+    if (activeTab === "paste") {
+      if (!pasteValue.trim()) {
+        throw new Error("Paste store data or use the sample data before commissioning the analysis.");
+      }
+
+      return pasteValue;
+    }
+
+    if (!manualDescription.trim()) {
+      throw new Error("Add a business description before commissioning the analysis.");
+    }
+
+    return JSON.stringify(
+      {
+        input_type: "plain_english_business_description",
+        industry: industry.trim() || "Not provided",
+        stage: stage.trim() || "Not provided",
+        description: manualDescription.trim()
+      },
+      null,
+      2
+    );
+  }
+
+  async function commissionAnalysis() {
+    setIsLoading(true);
+    setResult(null);
+    setStatusMode("loading");
+    setStatusText("Reviewing your submission…");
+
+    try {
+      const input = buildInput();
+
+      const responsePromise = fetch("/api/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          mode: activeTab,
+          input
+        })
+      });
+
+      await sleep(650);
+      setStatusText("Reading your data in context…");
+
+      await sleep(900);
+      setStatusText("Drafting the memorandum…");
+
+      const response = await responsePromise;
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "The analysis could not be completed.");
+      }
+
+      setResult(payload as AnalysisResult);
+      setStatusMode("success");
+      setStatusText("Memorandum ready.");
+    } catch (error) {
+      setStatusMode("error");
+      setStatusText(error instanceof Error ? error.message : "Something went wrong.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  return (
+    <main>
+      <header className="site-header">
+        <div className="container header-inner">
+          <a className="wordmark" href="/" aria-label="Axiom AI home">
+            Axiom <span>AI</span>
+          </a>
+        </div>
+      </header>
+
+      <section className="hero container">
+        <div className="eyebrow">AI BUSINESS CONSULTANT</div>
+
+        <h1>
+          A considered read on <em>what your store is actually telling you.</em>
+        </h1>
+
+        <p className="lede">
+          Upload an export from your Shopify store, or paste a JSON summary. Axiom AI produces a
+          boardroom-grade memo: the three things worth your attention this quarter, the numbers
+          behind them, and the specific moves a seasoned operator would make next.
+        </p>
+
+        <dl className="hero-details">
+          <div>
+            <dt>Engagement</dt>
+            <dd>Single-session strategic analysis</dd>
+          </div>
+          <div>
+            <dt>Output</dt>
+            <dd>Senior-partner memorandum</dd>
+          </div>
+          <div>
+            <dt>Based on</dt>
+            <dd>Shopify exports, JSON summaries, or operator context</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="section container" aria-labelledby="intake-heading">
+        <div className="section-head">
+          <p>01 — Intake</p>
+          <h2 id="intake-heading">Submit the operating picture.</h2>
+        </div>
+
+        <div className="input-panel">
+          <div className="tabs" role="tablist" aria-label="Input method">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                className="tab-button"
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="tab-panel" role="tabpanel">
+            {activeTab === "upload" && (
+              <div className="upload-pane">
+                <input
+                  ref={fileInputRef}
+                  className="visually-hidden"
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+
+                    if (file) {
+                      readFile(file);
+                    }
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className={`drop-zone${dragActive ? " drag-active" : ""}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragActive(true);
+                  }}
+                  onDragLeave={() => setDragActive(false)}
+                  onDrop={handleDrop}
+                >
+                  <span>{fileName || "Drop a Shopify JSON export here, or click to select."}</span>
+                  <small>Accepted format: .json</small>
+                </button>
+              </div>
+            )}
+
+            {activeTab === "paste" && (
+              <label className="field">
+                <span>JSON data</span>
+                <textarea
+                  value={pasteValue}
+                  onChange={(event) => setPasteValue(event.target.value)}
+                  rows={18}
+                  spellCheck={false}
+                  placeholder="{&#10;  &quot;store&quot;: { ... }&#10;}"
+                />
+              </label>
+            )}
+
+            {activeTab === "manual" && (
+              <div className="manual-grid">
+                <label className="field">
+                  <span>Industry</span>
+                  <input
+                    value={industry}
+                    onChange={(event) => setIndustry(event.target.value)}
+                    placeholder="Apparel, beauty, home goods"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Stage</span>
+                  <input
+                    value={stage}
+                    onChange={(event) => setStage(event.target.value)}
+                    placeholder="Seed, growth, profitable, turnaround"
+                  />
+                </label>
+
+                <label className="field field-full">
+                  <span>Business description</span>
+                  <textarea
+                    value={manualDescription}
+                    onChange={(event) => setManualDescription(event.target.value)}
+                    rows={12}
+                    placeholder="Describe the store, channels, products, recent performance, constraints, and what you want the analysis to pressure-test."
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+
+          <div className="action-row">
+            <button
+              type="button"
+              className="button primary"
+              onClick={commissionAnalysis}
+              disabled={isLoading}
+            >
+              Commission analysis
+            </button>
+
+            <button type="button" className="button secondary" onClick={useSampleData}>
+              Use sample data
+            </button>
+          </div>
+
+          <p className="hint">Your data is sent to Anthropic&apos;s API for analysis and is not stored.</p>
+
+          {statusText && (
+            <div
+              className={`status-row ${statusMode}`}
+              role={statusMode === "error" ? "alert" : "status"}
+            >
+              {statusMode === "loading" && <span className="spinner" aria-hidden="true" />}
+              <span>{statusText}</span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {result && (
+        <section ref={reportRef} className="section container memorandum" aria-labelledby="memo-heading">
+          <div className="memo-header">
+            <div>
+              <p className="eyebrow">STRATEGIC MEMORANDUM</p>
+              <h2 id="memo-heading">{result.title}</h2>
+            </div>
+
+            <time>{todayLabel()}</time>
+          </div>
+
+          <div className="kpi-grid">
+            {result.kpis.slice(0, 4).map((kpi) => (
+              <div className="kpi-cell" key={`${kpi.label}-${kpi.value}`}>
+                <p>{kpi.label}</p>
+                <strong>{kpi.value}</strong>
+                <span>{kpi.delta}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="memo-body">
+            {result.memo.map((section) => (
+              <section key={section.heading}>
+                <h3>{section.heading}</h3>
+                {section.paragraphs.map((paragraph) => (
+                  <p key={paragraph}>{paragraph}</p>
+                ))}
+              </section>
+            ))}
+          </div>
+
+          <div className="recommendations" aria-label="Recommendations">
+            {result.recommendations.map((recommendation, index) => (
+              <div className="recommendation" key={recommendation.title}>
+                <span className="rec-number">{String(index + 1).padStart(2, "0")}</span>
+
+                <div>
+                  <h3>{recommendation.title}</h3>
+                  <p>{recommendation.detail}</p>
+                </div>
+
+                <span className={`priority ${recommendation.priority}`}>
+                  {recommendation.priority}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="section container method" aria-labelledby="method-heading">
+        <div className="section-head">
+          <p>02 — Method</p>
+          <h2 id="method-heading">How Axiom reads the business.</h2>
+        </div>
+
+        <div className="method-grid">
+          <div>
+            <h3>Read before prescribing</h3>
+            <p>The memo starts with the operating context before drawing conclusions.</p>
+          </div>
+
+          <div>
+            <h3>Name the one thing</h3>
+            <p>It identifies the constraint most likely to shape the next quarter.</p>
+          </div>
+
+          <div>
+            <h3>Recommend with conviction</h3>
+            <p>Actions are sequenced by expected strategic leverage, not convenience.</p>
+          </div>
+        </div>
+      </section>
+
+      <footer className="site-footer">
+        <div className="container footer-inner">
+          <p>
+            Axiom AI is an independent analytical tool. Outputs are AI-generated and should be
+            treated as a starting point for operator judgement, not a substitute for qualified
+            professional advice.
+          </p>
+
+          <p>© {new Date().getFullYear()} Axiom AI</p>
+        </div>
+      </footer>
+    </main>
+  );
+}
+
+==============================
+app/globals.css
+==============================
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper: #f5f1ea;
+  --paper-2: #ebe5d9;
+  --rule: #d9d1c2;
+  --ink: #1a1a1a;
+  --ink-2: #3d3d3a;
+  --ink-3: #6b6862;
+  --accent: #2d4a3e;
+  --danger: #8b2c1f;
+  --panel: #fcfaf5;
+  --radius: 2px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 16px;
+  --s-4: 24px;
+  --s-5: 32px;
+  --s-6: 48px;
+  --s-7: 64px;
+  --s-8: 96px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.container {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding-left: var(--s-4);
+  padding-right: var(--s-4);
+}
+
+.site-header {
+  border-bottom: 1px solid var(--rule);
+}
+
+.header-inner {
+  height: var(--s-7);
+  display: flex;
+  align-items: center;
+}
+
+.wordmark {
+  color: var(--ink);
+  text-decoration: none;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+.wordmark span {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-left: var(--s-1);
+}
+
+.hero {
+  padding-top: var(--s-8);
+  padding-bottom: var(--s-7);
+}
+
+.eyebrow {
+  margin: 0 0 var(--s-3);
+  color: var(--ink-3);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+h1,
+h2,
+h3 {
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+h1 {
+  max-width: 900px;
+  margin: 0;
+  font-size: 56px;
+  line-height: 1.05;
+}
+
+h1 em {
+  color: var(--accent);
+  font-style: italic;
+}
+
+.lede {
+  max-width: 56ch;
+  margin: var(--s-4) 0 0;
+  color: var(--ink-2);
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+.hero-details {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-4);
+  margin: var(--s-6) 0 0;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--rule);
+}
+
+.hero-details div {
+  min-width: 0;
+}
+
+.hero-details dt {
+  color: var(--ink-3);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.hero-details dd {
+  margin: var(--s-2) 0 0;
+  color: var(--ink-2);
+}
+
+.section {
+  padding-top: var(--s-7);
+  padding-bottom: var(--s-7);
+}
+
+.section-head {
+  display: grid;
+  grid-template-columns: 1fr 3fr;
+  gap: var(--s-5);
+  margin-bottom: var(--s-5);
+}
+
+.section-head p {
+  margin: var(--s-2) 0 0;
+  color: var(--ink-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.input-panel {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--s-5);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--s-4);
+  border-bottom: 1px solid var(--rule);
+}
+
+.tab-button {
+  appearance: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-3);
+  padding: 0 0 var(--s-3);
+}
+
+.tab-button[aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.tab-panel {
+  padding-top: var(--s-5);
+}
+
+.drop-zone {
+  width: 100%;
+  min-height: calc(var(--s-8) * 2);
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  padding: var(--s-5);
+  text-align: center;
+}
+
+.drop-zone.drag-active {
+  border-style: solid;
+  border-color: var(--ink);
+}
+
+.drop-zone span {
+  display: block;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 20px;
+}
+
+.drop-zone small {
+  display: block;
+  margin-top: var(--s-2);
+  color: var(--ink-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.field span {
+  color: var(--ink-3);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+textarea,
+input {
+  width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  padding: var(--s-3);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--ink-3);
+}
+
+.manual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s-4);
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-top: var(--s-5);
+}
+
+.button {
+  border-radius: var(--radius);
+  padding: 12px 20px;
+  border: 1px solid var(--ink);
+  transition: opacity 120ms ease;
+}
+
+.button:hover {
+  opacity: 0.88;
+}
+
+.button.primary {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.button.secondary {
+  background: transparent;
+  color: var(--ink);
+}
+
+.hint {
+  margin: var(--s-3) 0 0;
+  color: var(--ink-3);
+  font-size: 14px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  color: var(--ink-2);
+}
+
+.status-row.error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.status-row.success {
+  color: var(--ink-2);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--rule);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 850ms linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.memorandum {
+  border-top: 1px solid var(--rule);
+}
+
+.memo-header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-5);
+  align-items: flex-start;
+  margin-bottom: var(--s-5);
+}
+
+.memo-header h2 {
+  margin: 0;
+  max-width: 760px;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.memo-header time {
+  color: var(--ink-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--rule);
+  margin-bottom: var(--s-6);
+}
+
+.kpi-cell {
+  padding: var(--s-4);
+  border-right: 1px solid var(--rule);
+}
+
+.kpi-cell:last-child {
+  border-right: 0;
+}
+
+.kpi-cell p {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.kpi-cell strong {
+  display: block;
+  margin-top: var(--s-3);
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 400;
+}
+
+.kpi-cell span {
+  display: block;
+  margin-top: var(--s-2);
+  color: var(--ink-3);
+  font-size: 14px;
+}
+
+.memo-body {
+  max-width: 760px;
+}
+
+.memo-body section {
+  margin-bottom: var(--s-6);
+}
+
+.memo-body h3,
+.recommendation h3,
+.method-grid h3 {
+  margin: 0 0 var(--s-3);
+  padding-bottom: var(--s-2);
+  border-bottom: 1px solid var(--rule);
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.memo-body p {
+  margin: 0 0 var(--s-3);
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+
+.recommendations {
+  border-top: 1px solid var(--rule);
+}
+
+.recommendation {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: var(--s-4);
+  align-items: start;
+  padding: var(--s-4) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rec-number {
+  color: var(--ink-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.recommendation h3 {
+  margin-bottom: var(--s-2);
+}
+
+.recommendation p {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+
+.priority {
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  padding: var(--s-1) var(--s-2);
+  color: var(--ink);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.priority.high {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.method {
+  border-top: 1px solid var(--rule);
+}
+
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-4);
+}
+
+.method-grid div {
+  border-top: 1px solid var(--rule);
+  padding-top: var(--s-4);
+}
+
+.method-grid p {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+
+.site-footer {
+  border-top: 1px solid var(--rule);
+  padding: var(--s-5) 0;
+}
+
+.footer-inner {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--s-5);
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.footer-inner p {
+  margin: 0;
+}
+
+.footer-inner p:last-child {
+  text-align: right;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  h1 {
+    font-size: 38px;
+  }
+
+  .hero {
+    padding-top: var(--s-7);
+    padding-bottom: var(--s-6);
+  }
+
+  .hero-details,
+  .section-head,
+  .method-grid,
+  .footer-inner {
+    grid-template-columns: 1fr;
+  }
+
+  .section-head {
+    gap: var(--s-3);
+  }
+
+  .section-head h2,
+  .memo-header h2 {
+    font-size: 24px;
+  }
+
+  .input-panel {
+    padding: var(--s-4);
+  }
+
+  .tabs {
+    gap: var(--s-3);
+    overflow-x: auto;
+  }
+
+  .manual-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .memo-header {
+    flex-direction: column;
+    gap: var(--s-3);
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .kpi-cell {
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .kpi-cell:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .kpi-cell:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .recommendation {
+    grid-template-columns: 48px 1fr;
+  }
+
+  .priority {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .footer-inner p:last-child {
+    text-align: left;
+  }
+}
+
+@media (max-width: 375px) {
+  .container {
+    padding-left: var(--s-3);
+    padding-right: var(--s-3);
+  }
+
+  .action-row {
+    flex-direction: column;
+  }
+
+  .button {
+    width: 100%;
+  }
+}
+
+==============================
+app/api/analyze/route.ts
+==============================
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
@@ -243,3 +1471,66 @@ ${input || "No input provided."}`
       },
       { status: 500 }
     );
+  }
+}
+
+==============================
+.env.local.example
+==============================
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+==============================
+.gitignore
+==============================
+node_modules
+.next
+out
+.vercel
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+
+==============================
+README.md
+==============================
+# Axiom AI
+
+Axiom AI is a single-session AI business consultant for Shopify operators. Upload store data, paste a JSON summary, or enter plain-English context, then receive a strategic memorandum written in the voice of a senior partner at a boutique strategy firm.
+
+## Quick start
+
+```bash
+npm install
+cp .env.local.example .env.local
+```
+
+Add your Anthropic API key to `.env.local`:
+
+```bash
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+```
+
+Start the app:
+
+```bash
+npm run dev
+```
+
+Open the local Next.js URL shown in your terminal.
+
+## Deploy to Vercel
+
+1. Push this project to GitHub.
+2. Import the GitHub repository in Vercel.
+3. Add `ANTHROPIC_API_KEY` as an environment variable in the Vercel project settings.
+4. Deploy.
+
+## Security note
+
+The API key never touches the browser. All Anthropic calls go through `/api/analyze`, which runs as a Next.js API route on the server.
+
